@@ -1,0 +1,122 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import '../data/webview_bridge.dart';
+import '../../../config/app_config.dart';
+
+class WebViewScreen extends ConsumerStatefulWidget {
+  const WebViewScreen({super.key});
+
+  @override
+  ConsumerState<WebViewScreen> createState() => _WebViewScreenState();
+}
+
+class _WebViewScreenState extends ConsumerState<WebViewScreen> {
+  late final WebViewController _controller;
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeWebView();
+  }
+
+  void _initializeWebView() {
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (int progress) {
+            // 로딩 진행률 업데이트
+          },
+          onPageStarted: (String url) {
+            setState(() {
+              _isLoading = true;
+              _error = null;
+            });
+          },
+          onPageFinished: (String url) async {
+            setState(() {
+              _isLoading = false;
+            });
+            
+            // WebView 초기화 완료 후 브릿지 설정
+            await _setupWebViewBridge();
+          },
+          onWebResourceError: (WebResourceError error) {
+            setState(() {
+              _isLoading = false;
+              _error = error.description;
+            });
+          },
+          onNavigationRequest: (NavigationRequest request) {
+            // 특정 URL로의 네비게이션 제어
+            return NavigationDecision.navigate;
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(AppConfig.webUrl));
+  }
+
+  Future<void> _setupWebViewBridge() async {
+    final bridge = WebViewBridge(_controller, ref);
+    
+    // JavaScript 채널 설정
+    bridge.setupJavaScriptChannels();
+    
+    // 토큰 주입
+    await bridge.injectToken();
+    
+    // 네이티브 데이터 주입
+    await bridge.injectNativeData();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          WebViewWidget(controller: _controller),
+          if (_isLoading)
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
+          if (_error != null)
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: Colors.red,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '오류가 발생했습니다',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      _controller.reload();
+                    },
+                    child: const Text('다시 시도'),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+}
+
