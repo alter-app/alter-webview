@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/material.dart';
 import '../../../core/storage/token_manager.dart';
 import '../../location/presentation/location_provider.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -13,65 +14,80 @@ import '../../location/data/location_repository.dart';
 class WebViewBridge {
   final WebViewController _controller;
   final WidgetRef _ref;
+  final BuildContext _context;
 
-  WebViewBridge(this._controller, this._ref);
+  WebViewBridge(this._controller, this._ref, this._context);
 
   /// WebView에 토큰 주입
   Future<void> injectToken() async {
-    final token = await TokenManager.getToken();
-    if (token != null) {
-      await _controller.runJavaScript('''
-        localStorage.setItem('jwt_token', '$token');
-        window.dispatchEvent(new CustomEvent('tokenInjected', { detail: { token: '$token' } }));
-      ''');
+    try {
+      final token = await TokenManager.getToken();
+      if (token != null) {
+        await _controller.runJavaScript('''
+          localStorage.setItem('jwt_token', '$token');
+          window.dispatchEvent(new CustomEvent('tokenInjected', { detail: { token: '$token' } }));
+        ''');
+      }
+    } catch (e) {
+      // 토큰 주입 실패 시 무시
     }
   }
 
   /// WebView에 네이티브 데이터 주입
   Future<void> injectNativeData() async {
-    final deviceInfo = await _getDeviceInfo();
-    final appInfo = await _getAppInfo();
-    final networkInfo = await _getNetworkInfo();
-    
-    final nativeData = {
-      'device': deviceInfo,
-      'app': appInfo,
-      'network': networkInfo,
-      'platform': Platform.operatingSystem,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
+    try {
+      final deviceInfo = await _getDeviceInfo();
+      final appInfo = await _getAppInfo();
+      final networkInfo = await _getNetworkInfo();
+      final screenInfo = await _getScreenInfo();
+      
+      final nativeData = {
+        'device': deviceInfo,
+        'app': appInfo,
+        'network': networkInfo,
+        'screen': screenInfo,
+        'platform': Platform.operatingSystem,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
 
-    await _controller.runJavaScript('''
-      window.nativeData = ${jsonEncode(nativeData)};
-      window.dispatchEvent(new CustomEvent('nativeDataInjected', { detail: ${jsonEncode(nativeData)} }));
-    ''');
+      await _controller.runJavaScript('''
+        window.nativeData = ${jsonEncode(nativeData)};
+        window.dispatchEvent(new CustomEvent('nativeDataInjected', { detail: ${jsonEncode(nativeData)} }));
+      ''');
+    } catch (e) {
+      // 네이티브 데이터 주입 실패 시 무시
+    }
   }
 
   /// JavaScript 채널 설정
   void setupJavaScriptChannels() {
-    // 위치 정보 요청 채널
-    _controller.addJavaScriptChannel(
-      'LocationChannel',
-      onMessageReceived: (JavaScriptMessage message) async {
-        await _handleLocationRequest(message.message);
-      },
-    );
+    try {
+      // 위치 정보 요청 채널
+      _controller.addJavaScriptChannel(
+        'LocationChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleLocationRequest(message.message);
+        },
+      );
 
-    // 토큰 관리 채널
-    _controller.addJavaScriptChannel(
-      'TokenChannel',
-      onMessageReceived: (JavaScriptMessage message) async {
-        await _handleTokenRequest(message.message);
-      },
-    );
+      // 토큰 관리 채널
+      _controller.addJavaScriptChannel(
+        'TokenChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleTokenRequest(message.message);
+        },
+      );
 
-    // 네이티브 기능 요청 채널
-    _controller.addJavaScriptChannel(
-      'NativeChannel',
-      onMessageReceived: (JavaScriptMessage message) async {
-        await _handleNativeRequest(message.message);
-      },
-    );
+      // 네이티브 기능 요청 채널
+      _controller.addJavaScriptChannel(
+        'NativeChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleNativeRequest(message.message);
+        },
+      );
+    } catch (e) {
+      // JavaScript 채널 설정 실패 시 무시
+    }
   }
 
   /// 위치 정보 요청 처리
@@ -335,5 +351,42 @@ class WebViewBridge {
       'status': connectivity.name,
       'isConnected': connectivity != ConnectivityResult.none,
     };
+  }
+
+  /// 화면 정보 조회 (지도 렌더링을 위한 SafeArea 정보 포함)
+  Future<Map<String, dynamic>> _getScreenInfo() async {
+    try {
+      final mediaQuery = MediaQuery.of(_context);
+      final statusBarHeight = mediaQuery.padding.top;
+      final bottomPadding = mediaQuery.padding.bottom;
+      final screenWidth = mediaQuery.size.width;
+      final screenHeight = mediaQuery.size.height;
+      final devicePixelRatio = mediaQuery.devicePixelRatio;
+      
+      return {
+        'width': screenWidth,
+        'height': screenHeight,
+        'devicePixelRatio': devicePixelRatio,
+        'statusBarHeight': statusBarHeight,
+        'bottomPadding': bottomPadding,
+        'safeAreaTop': statusBarHeight,
+        'safeAreaBottom': bottomPadding,
+        'availableHeight': screenHeight - statusBarHeight - bottomPadding,
+        'isFullScreen': statusBarHeight == 0,
+      };
+    } catch (e) {
+      // 기본값 반환
+      return {
+        'width': 375.0,
+        'height': 812.0,
+        'devicePixelRatio': 2.0,
+        'statusBarHeight': 44.0,
+        'bottomPadding': 34.0,
+        'safeAreaTop': 44.0,
+        'safeAreaBottom': 34.0,
+        'availableHeight': 734.0,
+        'isFullScreen': false,
+      };
+    }
   }
 }
