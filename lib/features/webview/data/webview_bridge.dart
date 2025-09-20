@@ -8,7 +8,6 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:io';
-import '../../auth/presentation/auth_provider.dart';
 import '../../location/data/location_repository.dart';
 
 class WebViewBridge {
@@ -39,7 +38,8 @@ class WebViewBridge {
         ''');
       }
     } catch (e) {
-      // 토큰 주입 실패 시 무시
+      // 토큰 주입 실패 시 에러 로그 출력
+      debugPrint('토큰 주입 실패: $e');
     }
   }
 
@@ -65,7 +65,8 @@ class WebViewBridge {
         window.dispatchEvent(new CustomEvent('nativeDataInjected', { detail: ${jsonEncode(nativeData)} }));
       ''');
     } catch (e) {
-      // 네이티브 데이터 주입 실패 시 무시
+      // 네이티브 데이터 주입 실패 시 에러 로그 출력
+      debugPrint('네이티브 데이터 주입 실패: $e');
     }
   }
 
@@ -96,7 +97,8 @@ class WebViewBridge {
         },
       );
     } catch (e) {
-      // JavaScript 채널 설정 실패 시 무시
+      // JavaScript 채널 설정 실패 시 에러 로그 출력
+      debugPrint('JavaScript 채널 설정 실패: $e');
     }
   }
 
