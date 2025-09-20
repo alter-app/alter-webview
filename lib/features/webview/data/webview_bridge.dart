@@ -22,10 +22,20 @@ class WebViewBridge {
   Future<void> injectToken() async {
     try {
       final token = await TokenManager.getToken();
-      if (token != null) {
+      if (token != null && TokenManager.isTokenValid(token)) {
+        // XSS 방지를 위한 안전한 토큰 주입
         await _controller.runJavaScript('''
-          localStorage.setItem('jwt_token', '$token');
-          window.dispatchEvent(new CustomEvent('tokenInjected', { detail: { token: '$token' } }));
+          (function() {
+            try {
+              const token = ${jsonEncode(token)};
+              localStorage.setItem('jwt_token', token);
+              window.dispatchEvent(new CustomEvent('tokenInjected', { 
+                detail: { token: token } 
+              }));
+            } catch (e) {
+              console.error('Token injection failed:', e);
+            }
+          })();
         ''');
       }
     } catch (e) {
@@ -122,9 +132,7 @@ class WebViewBridge {
         case 'getToken':
           await _sendTokenToWeb();
           break;
-        case 'refreshToken':
-          await _refreshTokenForWeb();
-          break;
+        // 토큰 갱신은 웹에서 처리하므로 제거
         case 'clearToken':
           await _clearTokenForWeb();
           break;
@@ -232,30 +240,29 @@ class WebViewBridge {
   /// 토큰을 WebView로 전송
   Future<void> _sendTokenToWeb() async {
     final token = await TokenManager.getToken();
-    await _controller.runJavaScript('''
-      window.dispatchEvent(new CustomEvent('tokenReceived', { 
-        detail: { token: ${token != null ? '"$token"' : 'null'} } 
-      }));
-    ''');
-  }
-
-  /// 토큰 갱신
-  Future<void> _refreshTokenForWeb() async {
-    try {
-      final authNotifier = _ref.read(authProvider.notifier);
-      await authNotifier.refreshToken();
-      
-      final newToken = await TokenManager.getToken();
+    if (token != null && TokenManager.isTokenValid(token)) {
       await _controller.runJavaScript('''
-        localStorage.setItem('jwt_token', '$newToken');
-        window.dispatchEvent(new CustomEvent('tokenRefreshed', { 
-          detail: { token: '$newToken' } 
+        (function() {
+          try {
+            const token = ${jsonEncode(token)};
+            window.dispatchEvent(new CustomEvent('tokenReceived', { 
+              detail: { token: token } 
+            }));
+          } catch (e) {
+            console.error('Token send failed:', e);
+          }
+        })();
+      ''');
+    } else {
+      await _controller.runJavaScript('''
+        window.dispatchEvent(new CustomEvent('tokenReceived', { 
+          detail: { token: null } 
         }));
       ''');
-    } catch (e) {
-      await _sendErrorToWeb('token', e.toString());
     }
   }
+
+  // 토큰 갱신은 웹에서 처리하므로 제거
 
   /// 토큰 삭제
   Future<void> _clearTokenForWeb() async {
@@ -299,9 +306,16 @@ class WebViewBridge {
   /// 에러를 WebView로 전송
   Future<void> _sendErrorToWeb(String type, String error) async {
     await _controller.runJavaScript('''
-      window.dispatchEvent(new CustomEvent('nativeError', { 
-        detail: { type: '$type', error: '$error' } 
-      }));
+      (function() {
+        try {
+          const errorData = ${jsonEncode({'type': type, 'error': error})};
+          window.dispatchEvent(new CustomEvent('nativeError', { 
+            detail: errorData 
+          }));
+        } catch (e) {
+          console.error('Error send failed:', e);
+        }
+      })();
     ''');
   }
 

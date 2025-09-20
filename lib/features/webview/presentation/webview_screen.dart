@@ -26,6 +26,7 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
   void _initializeWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..enableZoom(false)
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (int progress) {
@@ -52,7 +53,7 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
             });
           },
           onNavigationRequest: (NavigationRequest request) {
-            // 특정 URL로의 네비게이션 제어
+            // 모든 네비게이션 허용
             return NavigationDecision.navigate;
           },
         ),

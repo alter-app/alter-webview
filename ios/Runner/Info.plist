@@ -58,19 +58,29 @@
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>이 앱은 위치 기반 서비스를 제공하기 위해 위치 정보가 필요합니다.</string>
 	
-	<!-- 카메라 권한 -->
-	<key>NSCameraUsageDescription</key>
-	<string>이 앱은 카메라 기능을 사용하기 위해 카메라 접근 권한이 필요합니다.</string>
+	<!-- 카메라 권한 (필요시) -->
+	<!-- <key>NSCameraUsageDescription</key>
+	<string>이 앱은 카메라 기능을 사용하기 위해 카메라 접근 권한이 필요합니다.</string> -->
 	
-	<!-- 사진 라이브러리 권한 -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>이 앱은 사진을 선택하기 위해 사진 라이브러리 접근 권한이 필요합니다.</string>
+	<!-- 사진 라이브러리 권한 (필요시) -->
+	<!-- <key>NSPhotoLibraryUsageDescription</key>
+	<string>이 앱은 사진을 선택하기 위해 사진 라이브러리 접근 권한이 필요합니다.</string> -->
 	
 	<!-- 네트워크 보안 설정 -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
+		<false/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSExceptionMinimumTLSVersion</key>
+				<string>TLSv1.0</string>
+			</dict>
+		</dict>
 	</dict>
 </dict>
 </plist>
