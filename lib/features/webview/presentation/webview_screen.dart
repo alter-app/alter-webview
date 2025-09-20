@@ -15,6 +15,7 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   String? _error;
+  bool _bridgeSetup = false;
 
   @override
   void initState() {
@@ -25,6 +26,7 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
   void _initializeWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..enableZoom(false)
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (int progress) {
@@ -51,25 +53,47 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
             });
           },
           onNavigationRequest: (NavigationRequest request) {
-            // 특정 URL로의 네비게이션 제어
+            // 모든 네비게이션 허용
             return NavigationDecision.navigate;
           },
         ),
-      )
-      ..loadRequest(Uri.parse(AppConfig.webUrl));
+      );
+    
+    // JavaScript 채널을 먼저 설정
+    _setupJavaScriptChannels();
+    
+    // 그 다음 URL 로드
+    _controller.loadRequest(Uri.parse(AppConfig.webUrl));
+  }
+  
+  void _setupJavaScriptChannels() {
+    try {
+      final bridge = WebViewBridge(_controller, ref, context);
+      bridge.setupJavaScriptChannels();
+    } catch (e) {
+      // JavaScript 채널 설정 실패 시 무시
+    }
   }
 
   Future<void> _setupWebViewBridge() async {
-    final bridge = WebViewBridge(_controller, ref);
+    // 이미 브릿지가 설정되었다면 중복 실행 방지
+    if (_bridgeSetup) return;
     
-    // JavaScript 채널 설정
-    bridge.setupJavaScriptChannels();
-    
-    // 토큰 주입
-    await bridge.injectToken();
-    
-    // 네이티브 데이터 주입
-    await bridge.injectNativeData();
+    try {
+      final bridge = WebViewBridge(_controller, ref, context);
+      
+      // 토큰 주입
+      await bridge.injectToken();
+      
+      // 네이티브 데이터 주입
+      await bridge.injectNativeData();
+      
+      _bridgeSetup = true;
+    } catch (e) {
+      setState(() {
+        _error = '브릿지 설정 실패: $e';
+      });
+    }
   }
 
   @override

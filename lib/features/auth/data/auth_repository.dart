@@ -32,45 +32,14 @@ class AuthRepository {
 
         return data;
       } else {
-        throw Exception('Login failed: ${response.statusMessage}');
+        throw Exception('로그인에 실패했습니다.');
       }
     } catch (e) {
-      throw Exception('Login error: $e');
+      throw Exception('로그인에 실패했습니다. 다시 시도해주세요.');
     }
   }
 
-  /// 토큰 갱신 (서버에서 새로운 토큰을 받아서 저장)
-  Future<String> refreshToken() async {
-    try {
-      final refreshToken = await TokenManager.getRefreshToken();
-      if (refreshToken == null) {
-        throw Exception('No refresh token available');
-      }
-
-      final response = await _dio.post(
-        '${AppConfig.apiBaseUrl}auth/refresh',
-        data: {'refresh_token': refreshToken},
-      );
-
-      if (response.statusCode == 200) {
-        final data = response.data;
-        final newToken = data['access_token'];
-        final newRefreshToken = data['refresh_token'];
-
-        if (newToken != null) {
-          await TokenManager.saveToken(newToken);
-        }
-        if (newRefreshToken != null) {
-          await TokenManager.saveRefreshToken(newRefreshToken);
-        }
-        
-        return newToken ?? '';
-      }
-      throw Exception('Token refresh failed');
-    } catch (e) {
-      throw Exception('Token refresh error: $e');
-    }
-  }
+  // 토큰 갱신은 웹에서 처리하므로 제거
 
   /// 로그아웃
   Future<void> logout() async {
@@ -109,10 +78,10 @@ class AuthRepository {
       if (response.statusCode == 200) {
         return response.data;
       } else {
-        throw Exception('Failed to get user info: ${response.statusMessage}');
+        throw Exception('사용자 정보를 가져올 수 없습니다.');
       }
     } catch (e) {
-      throw Exception('Get user info error: $e');
+      throw Exception('사용자 정보 조회에 실패했습니다.');
     }
   }
 }

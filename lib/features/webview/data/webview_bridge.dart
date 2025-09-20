@@ -1,77 +1,105 @@
 import 'dart:convert';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/material.dart';
 import '../../../core/storage/token_manager.dart';
 import '../../location/presentation/location_provider.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:io';
-import '../../auth/presentation/auth_provider.dart';
 import '../../location/data/location_repository.dart';
 
 class WebViewBridge {
   final WebViewController _controller;
   final WidgetRef _ref;
+  final BuildContext _context;
 
-  WebViewBridge(this._controller, this._ref);
+  WebViewBridge(this._controller, this._ref, this._context);
 
   /// WebView에 토큰 주입
   Future<void> injectToken() async {
-    final token = await TokenManager.getToken();
-    if (token != null) {
-      await _controller.runJavaScript('''
-        localStorage.setItem('jwt_token', '$token');
-        window.dispatchEvent(new CustomEvent('tokenInjected', { detail: { token: '$token' } }));
-      ''');
+    try {
+      final token = await TokenManager.getToken();
+      if (token != null && TokenManager.isTokenValid(token)) {
+        // XSS 방지를 위한 안전한 토큰 주입
+        await _controller.runJavaScript('''
+          (function() {
+            try {
+              const token = ${jsonEncode(token)};
+              localStorage.setItem('jwt_token', token);
+              window.dispatchEvent(new CustomEvent('tokenInjected', { 
+                detail: { token: token } 
+              }));
+            } catch (e) {
+              console.error('Token injection failed:', e);
+            }
+          })();
+        ''');
+      }
+    } catch (e) {
+      // 토큰 주입 실패 시 에러 로그 출력
+      debugPrint('토큰 주입 실패: $e');
     }
   }
 
   /// WebView에 네이티브 데이터 주입
   Future<void> injectNativeData() async {
-    final deviceInfo = await _getDeviceInfo();
-    final appInfo = await _getAppInfo();
-    final networkInfo = await _getNetworkInfo();
-    
-    final nativeData = {
-      'device': deviceInfo,
-      'app': appInfo,
-      'network': networkInfo,
-      'platform': Platform.operatingSystem,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
+    try {
+      final deviceInfo = await _getDeviceInfo();
+      final appInfo = await _getAppInfo();
+      final networkInfo = await _getNetworkInfo();
+      final screenInfo = await _getScreenInfo();
+      
+      final nativeData = {
+        'device': deviceInfo,
+        'app': appInfo,
+        'network': networkInfo,
+        'screen': screenInfo,
+        'platform': Platform.operatingSystem,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
 
-    await _controller.runJavaScript('''
-      window.nativeData = ${jsonEncode(nativeData)};
-      window.dispatchEvent(new CustomEvent('nativeDataInjected', { detail: ${jsonEncode(nativeData)} }));
-    ''');
+      await _controller.runJavaScript('''
+        window.nativeData = ${jsonEncode(nativeData)};
+        window.dispatchEvent(new CustomEvent('nativeDataInjected', { detail: ${jsonEncode(nativeData)} }));
+      ''');
+    } catch (e) {
+      // 네이티브 데이터 주입 실패 시 에러 로그 출력
+      debugPrint('네이티브 데이터 주입 실패: $e');
+    }
   }
 
   /// JavaScript 채널 설정
   void setupJavaScriptChannels() {
-    // 위치 정보 요청 채널
-    _controller.addJavaScriptChannel(
-      'LocationChannel',
-      onMessageReceived: (JavaScriptMessage message) async {
-        await _handleLocationRequest(message.message);
-      },
-    );
+    try {
+      // 위치 정보 요청 채널
+      _controller.addJavaScriptChannel(
+        'LocationChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleLocationRequest(message.message);
+        },
+      );
 
-    // 토큰 관리 채널
-    _controller.addJavaScriptChannel(
-      'TokenChannel',
-      onMessageReceived: (JavaScriptMessage message) async {
-        await _handleTokenRequest(message.message);
-      },
-    );
+      // 토큰 관리 채널
+      _controller.addJavaScriptChannel(
+        'TokenChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleTokenRequest(message.message);
+        },
+      );
 
-    // 네이티브 기능 요청 채널
-    _controller.addJavaScriptChannel(
-      'NativeChannel',
-      onMessageReceived: (JavaScriptMessage message) async {
-        await _handleNativeRequest(message.message);
-      },
-    );
+      // 네이티브 기능 요청 채널
+      _controller.addJavaScriptChannel(
+        'NativeChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleNativeRequest(message.message);
+        },
+      );
+    } catch (e) {
+      // JavaScript 채널 설정 실패 시 에러 로그 출력
+      debugPrint('JavaScript 채널 설정 실패: $e');
+    }
   }
 
   /// 위치 정보 요청 처리
@@ -106,9 +134,7 @@ class WebViewBridge {
         case 'getToken':
           await _sendTokenToWeb();
           break;
-        case 'refreshToken':
-          await _refreshTokenForWeb();
-          break;
+        // 토큰 갱신은 웹에서 처리하므로 제거
         case 'clearToken':
           await _clearTokenForWeb();
           break;
@@ -216,30 +242,29 @@ class WebViewBridge {
   /// 토큰을 WebView로 전송
   Future<void> _sendTokenToWeb() async {
     final token = await TokenManager.getToken();
-    await _controller.runJavaScript('''
-      window.dispatchEvent(new CustomEvent('tokenReceived', { 
-        detail: { token: ${token != null ? '"$token"' : 'null'} } 
-      }));
-    ''');
-  }
-
-  /// 토큰 갱신
-  Future<void> _refreshTokenForWeb() async {
-    try {
-      final authNotifier = _ref.read(authProvider.notifier);
-      await authNotifier.refreshToken();
-      
-      final newToken = await TokenManager.getToken();
+    if (token != null && TokenManager.isTokenValid(token)) {
       await _controller.runJavaScript('''
-        localStorage.setItem('jwt_token', '$newToken');
-        window.dispatchEvent(new CustomEvent('tokenRefreshed', { 
-          detail: { token: '$newToken' } 
+        (function() {
+          try {
+            const token = ${jsonEncode(token)};
+            window.dispatchEvent(new CustomEvent('tokenReceived', { 
+              detail: { token: token } 
+            }));
+          } catch (e) {
+            console.error('Token send failed:', e);
+          }
+        })();
+      ''');
+    } else {
+      await _controller.runJavaScript('''
+        window.dispatchEvent(new CustomEvent('tokenReceived', { 
+          detail: { token: null } 
         }));
       ''');
-    } catch (e) {
-      await _sendErrorToWeb('token', e.toString());
     }
   }
+
+  // 토큰 갱신은 웹에서 처리하므로 제거
 
   /// 토큰 삭제
   Future<void> _clearTokenForWeb() async {
@@ -283,9 +308,16 @@ class WebViewBridge {
   /// 에러를 WebView로 전송
   Future<void> _sendErrorToWeb(String type, String error) async {
     await _controller.runJavaScript('''
-      window.dispatchEvent(new CustomEvent('nativeError', { 
-        detail: { type: '$type', error: '$error' } 
-      }));
+      (function() {
+        try {
+          const errorData = ${jsonEncode({'type': type, 'error': error})};
+          window.dispatchEvent(new CustomEvent('nativeError', { 
+            detail: errorData 
+          }));
+        } catch (e) {
+          console.error('Error send failed:', e);
+        }
+      })();
     ''');
   }
 
@@ -335,5 +367,42 @@ class WebViewBridge {
       'status': connectivity.name,
       'isConnected': connectivity != ConnectivityResult.none,
     };
+  }
+
+  /// 화면 정보 조회 (지도 렌더링을 위한 SafeArea 정보 포함)
+  Future<Map<String, dynamic>> _getScreenInfo() async {
+    try {
+      final mediaQuery = MediaQuery.of(_context);
+      final statusBarHeight = mediaQuery.padding.top;
+      final bottomPadding = mediaQuery.padding.bottom;
+      final screenWidth = mediaQuery.size.width;
+      final screenHeight = mediaQuery.size.height;
+      final devicePixelRatio = mediaQuery.devicePixelRatio;
+      
+      return {
+        'width': screenWidth,
+        'height': screenHeight,
+        'devicePixelRatio': devicePixelRatio,
+        'statusBarHeight': statusBarHeight,
+        'bottomPadding': bottomPadding,
+        'safeAreaTop': statusBarHeight,
+        'safeAreaBottom': bottomPadding,
+        'availableHeight': screenHeight - statusBarHeight - bottomPadding,
+        'isFullScreen': statusBarHeight == 0,
+      };
+    } catch (e) {
+      // 기본값 반환
+      return {
+        'width': 375.0,
+        'height': 812.0,
+        'devicePixelRatio': 2.0,
+        'statusBarHeight': 44.0,
+        'bottomPadding': 34.0,
+        'safeAreaTop': 44.0,
+        'safeAreaBottom': 34.0,
+        'availableHeight': 734.0,
+        'isFullScreen': false,
+      };
+    }
   }
 }

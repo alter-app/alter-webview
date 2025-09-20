@@ -23,23 +23,8 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
       },
       onError: (error, handler) async {
         if (error.response?.statusCode == 401) {
-          // 토큰 만료 시 갱신 시도
-          try {
-            final authRepo = AuthRepository(dio);
-            await authRepo.refreshToken();
-            
-            // 원래 요청 재시도
-            final token = await TokenManager.getToken();
-            if (token != null) {
-              error.requestOptions.headers['Authorization'] = 'Bearer $token';
-              final response = await dio.fetch(error.requestOptions);
-              handler.resolve(response);
-              return;
-            }
-          } catch (e) {
-            // 토큰 갱신 실패 시 로그아웃
-            await TokenManager.clearTokens();
-          }
+          // 토큰 만료 시 토큰 삭제 (웹에서 자동 갱신 처리)
+          await TokenManager.clearTokens();
         }
         handler.next(error);
       },
@@ -146,14 +131,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<void> refreshToken() async {
-    try {
-      final newToken = await _authRepository.refreshToken();
-      state = state.copyWith(token: newToken);
-    } catch (e) {
-      await logout();
-    }
-  }
+  // 토큰 갱신은 웹에서 처리하므로 제거
 }
 
 // Auth Provider

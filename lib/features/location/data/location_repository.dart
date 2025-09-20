@@ -42,7 +42,7 @@ class LocationRepository {
         timeLimit: const Duration(seconds: 10),
       );
     } catch (e) {
-      throw LocationException('Failed to get current position: $e');
+      throw LocationException('현재 위치를 가져올 수 없습니다.');
     }
   }
 
@@ -95,14 +95,14 @@ class LocationException implements Exception {
 }
 
 class LocationServiceDisabledException extends LocationException {
-  LocationServiceDisabledException() : super('Location services are disabled');
+  LocationServiceDisabledException() : super('위치 서비스가 비활성화되어 있습니다.');
 }
 
 class LocationPermissionDeniedException extends LocationException {
-  LocationPermissionDeniedException() : super('Location permission denied');
+  LocationPermissionDeniedException() : super('위치 권한이 거부되었습니다.');
 }
 
 class LocationPermissionDeniedForeverException extends LocationException {
   LocationPermissionDeniedForeverException() 
-      : super('Location permission denied forever');
+      : super('위치 권한이 영구적으로 거부되었습니다.');
 }
