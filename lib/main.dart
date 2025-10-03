@@ -30,11 +30,6 @@ void main() async {
     AppConfig.apiBaseUrl;
     AppConfig.appName;
     AppConfig.appVersion;
-    AppConfig.locationUpdateInterval;
-    AppConfig.locationAccuracy;
-    AppConfig.enableJavaScript;
-    AppConfig.enableLocalStorage;
-    AppConfig.enableGeolocation;
     
     runApp(
       const ProviderScope(
