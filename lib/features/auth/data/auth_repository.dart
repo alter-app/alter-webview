@@ -24,7 +24,7 @@ class AuthRepository {
         final refreshToken = data['refresh_token'];
 
         if (token != null) {
-          await TokenManager.saveToken(token);
+          await TokenManager.saveAccessToken(token);
         }
         if (refreshToken != null) {
           await TokenManager.saveRefreshToken(refreshToken);
@@ -44,7 +44,7 @@ class AuthRepository {
   /// 로그아웃
   Future<void> logout() async {
     try {
-      final token = await TokenManager.getToken();
+      final token = await TokenManager.getAccessToken();
       if (token != null) {
         await _dio.post(
           '${AppConfig.apiBaseUrl}auth/logout',
@@ -63,7 +63,7 @@ class AuthRepository {
   /// 사용자 정보 조회
   Future<Map<String, dynamic>> getUserInfo() async {
     try {
-      final token = await TokenManager.getToken();
+      final token = await TokenManager.getAccessToken();
       if (token == null) {
         throw Exception('No token available');
       }

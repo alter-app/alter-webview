@@ -15,7 +15,7 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   dio.interceptors.add(
     InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final token = await TokenManager.getToken();
+        final token = await TokenManager.getAccessToken();
         if (token != null) {
           options.headers['Authorization'] = 'Bearer $token';
         }
@@ -76,7 +76,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> _checkAuthStatus() async {
-    final token = await TokenManager.getToken();
+    final token = await TokenManager.getAccessToken();
     if (token != null && TokenManager.isTokenValid(token)) {
       state = state.copyWith(
         isAuthenticated: true,
