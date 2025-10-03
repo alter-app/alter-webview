@@ -16,6 +16,10 @@ class WebViewBridge {
   final WidgetRef _ref;
   final BuildContext _context;
 
+  // 지연 실행을 위한 상수
+  static const Duration _consoleLoggingDelay = Duration(milliseconds: 100);
+  static const Duration _dialogOverrideDelay = Duration(milliseconds: 200);
+
   WebViewBridge(this._controller, this._ref, this._context);
 
   /// WebView에 토큰 주입
@@ -67,12 +71,12 @@ class WebViewBridge {
       ''');
       
       // 로깅 브릿지 설정 (지연 실행)
-      Future.delayed(const Duration(milliseconds: 100), () async {
+      Future.delayed(_consoleLoggingDelay, () async {
         await _setupConsoleLogging();
       });
       
       // 다이얼로그 오버라이드 설정 (지연 실행)
-      Future.delayed(const Duration(milliseconds: 200), () async {
+      Future.delayed(_dialogOverrideDelay, () async {
         await _setupDialogOverride();
       });
     } catch (e) {
@@ -399,29 +403,30 @@ class WebViewBridge {
 
   /// 다이얼로그 요청 처리 (alert, confirm, prompt)
   Future<void> _handleDialogRequest(String message) async {
+    String? dialogId;
     try {
       final data = jsonDecode(message);
       final type = data['type'] as String;
-      final id = data['id'] as String;
+      dialogId = data['id'] as String;
       final title = data['title'] as String? ?? '';
       final messageText = data['message'] as String? ?? '';
       final defaultValue = data['defaultValue'] as String? ?? '';
 
       switch (type) {
         case 'alert':
-          await _showAlert(id, title, messageText);
+          await _showAlert(dialogId, title, messageText);
           break;
         case 'confirm':
-          await _showConfirm(id, title, messageText);
+          await _showConfirm(dialogId, title, messageText);
           break;
         case 'prompt':
-          await _showPrompt(id, title, messageText, defaultValue);
+          await _showPrompt(dialogId, title, messageText, defaultValue);
           break;
       }
     } catch (e) {
       WebViewLogger.error('다이얼로그 요청 처리 실패', source: 'DialogHandler', error: e);
-      // 에러 발생 시 기본값으로 응답 (ID를 알 수 없으므로 빈 문자열 사용)
-      await _sendDialogResponse('', false, '');
+      // 에러 발생 시 추출된 ID로 응답 (ID 추출 실패 시 빈 문자열)
+      await _sendDialogResponse(dialogId ?? '', false, '');
     }
   }
 

@@ -27,7 +27,6 @@ class LocationRepository {
       LocationPermission permission = await Geolocator.checkPermission();
       
       if (permission == LocationPermission.denied) {
-        
         // Geolocator를 통한 권한 요청
         permission = await Geolocator.requestPermission();
         
