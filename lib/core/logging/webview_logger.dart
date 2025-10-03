@@ -54,11 +54,6 @@ class WebViewLogger {
     Object? error,
     StackTrace? stackTrace,
   }) {
-    // info 레벨은 로깅하지 않음
-    if (level == LogLevel.info) {
-      return;
-    }
-    
     final cleanMessage = _cleanLogMessage(message);
     final timestamp = DateTime.now();
     
@@ -148,9 +143,9 @@ class WebViewLogger {
   /// 타임스탬프 포맷팅
   static String _formatTimestamp(DateTime timestamp) {
     return '${timestamp.hour.toString().padLeft(2, '0')}:'
-           '${timestamp.minute.toString().padLeft(2, '0')}:'
-           '${timestamp.second.toString().padLeft(2, '0')}.'
-           '${timestamp.millisecond.toString().padLeft(3, '0')}';
+        '${timestamp.minute.toString().padLeft(2, '0')}:'
+        '${timestamp.second.toString().padLeft(2, '0')}.'
+        '${timestamp.millisecond.toString().padLeft(3, '0')}';
   }
   
   /// 편의 메서드들

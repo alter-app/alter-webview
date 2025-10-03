@@ -66,22 +66,31 @@ class WebViewBridge {
         window.dispatchEvent(new CustomEvent('nativeDataInjected', { detail: ${jsonEncode(nativeData)} }));
       ''');
       
-      // 콘솔 로깅 브릿지 설정
-      await _setupConsoleLogging();
+      // 로깅 브릿지 설정 (지연 실행)
+      Future.delayed(const Duration(milliseconds: 100), () async {
+        await _setupConsoleLogging();
+      });
       
-      // 다이얼로그 오버라이드 설정
-      await _setupDialogOverride();
+      // 다이얼로그 오버라이드 설정 (지연 실행)
+      Future.delayed(const Duration(milliseconds: 200), () async {
+        await _setupDialogOverride();
+      });
     } catch (e) {
       // 네이티브 데이터 주입 실패 시 에러 로그 출력
       WebViewLogger.error('네이티브 데이터 주입 실패', source: 'NativeDataInjection', error: e);
     }
   }
 
-  /// 콘솔 로깅 브릿지 설정
+  /// 로깅 브릿지 설정
   Future<void> _setupConsoleLogging() async {
     try {
+      // 디버깅을 위한 로그
+      WebViewLogger.debug('로깅 브릿지 설정 시작', source: 'ConsoleLoggingSetup');
+      
       await _controller.runJavaScript('''
         (function() {
+          console.log('[WebView Bridge] 로깅 브릿지 설정 중...');
+          
           // 원본 콘솔 메서드들 저장
           const originalConsole = {
             log: console.log,
@@ -147,10 +156,14 @@ class WebViewBridge {
           window.addEventListener('unhandledrejection', function(event) {
             sendToNative('error', ['Unhandled Promise Rejection:', event.reason]);
           });
+          
+          console.log('[WebView Bridge] 로깅 브릿지 설정 완료');
         })();
       ''');
+      
+      WebViewLogger.debug('로깅 브릿지 설정 완료', source: 'ConsoleLoggingSetup');
     } catch (e) {
-      WebViewLogger.error('콘솔 로깅 브릿지 설정 실패', source: 'ConsoleLoggingSetup', error: e);
+      WebViewLogger.error('로깅 브릿지 설정 실패', source: 'ConsoleLoggingSetup', error: e);
     }
   }
 
@@ -262,7 +275,7 @@ class WebViewBridge {
         },
       );
 
-      // 콘솔 로깅 채널
+      // 로깅 채널
       _controller.addJavaScriptChannel(
         'ConsoleChannel',
         onMessageReceived: (JavaScriptMessage message) async {
@@ -347,7 +360,7 @@ class WebViewBridge {
     }
   }
 
-  /// 콘솔 로깅 처리
+  /// 로깅 처리
   Future<void> _handleConsoleLog(String message) async {
     try {
       final data = jsonDecode(message);
