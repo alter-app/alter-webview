@@ -44,14 +44,7 @@ class LocationState {
 class LocationNotifier extends StateNotifier<LocationState> {
   final LocationRepository _locationRepository;
 
-  LocationNotifier(this._locationRepository) : super(const LocationState()) {
-    _checkPermission();
-  }
-
-  Future<void> _checkPermission() async {
-    final hasPermission = await _locationRepository.isLocationPermissionGranted();
-    state = state.copyWith(hasPermission: hasPermission);
-  }
+  LocationNotifier(this._locationRepository) : super(const LocationState());
 
   Future<void> requestPermission() async {
     state = state.copyWith(isLoading: true, error: null);
@@ -71,43 +64,40 @@ class LocationNotifier extends StateNotifier<LocationState> {
   }
 
   Future<void> getCurrentLocation() async {
-    if (!state.hasPermission) {
-      state = state.copyWith(error: 'Location permission not granted');
-      return;
-    }
-
     state = state.copyWith(isLoading: true, error: null);
     
     try {
+      // LocationRepository의 getCurrentPosition()이 내부적으로 권한 체크 및 요청을 수행
       final position = await _locationRepository.getCurrentPosition();
       state = state.copyWith(
         isLoading: false,
         currentPosition: position,
+        hasPermission: true, // 위치 정보를 성공적으로 가져왔으므로 권한이 있음
       );
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
         error: e.toString(),
+        hasPermission: false, // 실패 시 권한이 없는 것으로 간주
       );
     }
   }
 
   void startTracking() {
-    if (!state.hasPermission) {
-      state = state.copyWith(error: 'Location permission not granted');
-      return;
-    }
-
     state = state.copyWith(isTracking: true, error: null);
     
     _locationRepository.getPositionStream().listen(
       (position) {
-        state = state.copyWith(currentPosition: position);
+        state = state.copyWith(
+          currentPosition: position,
+          hasPermission: true,
+        );
       },
       onError: (error) {
         state = state.copyWith(
           error: error.toString(),
           isTracking: false,
+          hasPermission: false,
         );
       },
     );
