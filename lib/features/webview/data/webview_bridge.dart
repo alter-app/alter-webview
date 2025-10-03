@@ -3,6 +3,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import '../../../core/storage/token_manager.dart';
+import '../../../core/logging/webview_logger.dart';
 import '../../location/presentation/location_provider.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -20,7 +21,7 @@ class WebViewBridge {
   /// WebView에 토큰 주입
   Future<void> injectToken() async {
     try {
-      final token = await TokenManager.getToken();
+      final token = await TokenManager.getAccessToken();
       if (token != null && TokenManager.isTokenValid(token)) {
         // XSS 방지를 위한 안전한 토큰 주입
         await _controller.runJavaScript('''
@@ -39,7 +40,7 @@ class WebViewBridge {
       }
     } catch (e) {
       // 토큰 주입 실패 시 에러 로그 출력
-      debugPrint('토큰 주입 실패: $e');
+      WebViewLogger.error('토큰 주입 실패', source: 'TokenInjection', error: e);
     }
   }
 
@@ -64,9 +65,173 @@ class WebViewBridge {
         window.nativeData = ${jsonEncode(nativeData)};
         window.dispatchEvent(new CustomEvent('nativeDataInjected', { detail: ${jsonEncode(nativeData)} }));
       ''');
+      
+      // 콘솔 로깅 브릿지 설정
+      await _setupConsoleLogging();
+      
+      // 다이얼로그 오버라이드 설정
+      await _setupDialogOverride();
     } catch (e) {
       // 네이티브 데이터 주입 실패 시 에러 로그 출력
-      debugPrint('네이티브 데이터 주입 실패: $e');
+      WebViewLogger.error('네이티브 데이터 주입 실패', source: 'NativeDataInjection', error: e);
+    }
+  }
+
+  /// 콘솔 로깅 브릿지 설정
+  Future<void> _setupConsoleLogging() async {
+    try {
+      await _controller.runJavaScript('''
+        (function() {
+          // 원본 콘솔 메서드들 저장
+          const originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn,
+            info: console.info,
+            debug: console.debug
+          };
+          
+          // 콘솔 메시지를 네이티브로 전송하는 함수
+          function sendToNative(level, args) {
+            try {
+              const message = Array.from(args).map(arg => {
+                if (typeof arg === 'object') {
+                  return JSON.stringify(arg);
+                }
+                return String(arg);
+              }).join(' ');
+              
+              const logData = {
+                level: level,
+                message: message,
+                timestamp: Date.now()
+              };
+              
+              ConsoleChannel.postMessage(JSON.stringify(logData));
+            } catch (e) {
+              // 네이티브 전송 실패 시 무시
+            }
+          }
+          
+          // 콘솔 메서드 오버라이드
+          console.log = function(...args) {
+            originalConsole.log.apply(console, args);
+            sendToNative('log', args);
+          };
+          
+          console.error = function(...args) {
+            originalConsole.error.apply(console, args);
+            sendToNative('error', args);
+          };
+          
+          console.warn = function(...args) {
+            originalConsole.warn.apply(console, args);
+            sendToNative('warn', args);
+          };
+          
+          console.info = function(...args) {
+            originalConsole.info.apply(console, args);
+            sendToNative('info', args);
+          };
+          
+          console.debug = function(...args) {
+            originalConsole.debug.apply(console, args);
+            sendToNative('debug', args);
+          };
+          
+          // 전역 에러 핸들러 설정
+          window.addEventListener('error', function(event) {
+            sendToNative('error', ['Uncaught Error:', event.error?.message || event.message]);
+          });
+          
+          window.addEventListener('unhandledrejection', function(event) {
+            sendToNative('error', ['Unhandled Promise Rejection:', event.reason]);
+          });
+        })();
+      ''');
+    } catch (e) {
+      WebViewLogger.error('콘솔 로깅 브릿지 설정 실패', source: 'ConsoleLoggingSetup', error: e);
+    }
+  }
+
+  /// 다이얼로그 오버라이드 설정 (alert, confirm, prompt)
+  Future<void> _setupDialogOverride() async {
+    try {
+      await _controller.runJavaScript('''
+        (function() {
+          // 다이얼로그 응답 대기열
+          const dialogPromises = new Map();
+          let dialogIdCounter = 0;
+          
+          // 다이얼로그 응답 이벤트 리스너
+          window.addEventListener('dialogResponse', function(event) {
+            const response = event.detail;
+            const promise = dialogPromises.get(response.id);
+            if (promise) {
+              promise.resolve(response);
+              dialogPromises.delete(response.id);
+            }
+          });
+          
+          // Promise 기반 다이얼로그 함수
+          function createDialogPromise(type, title, message, defaultValue) {
+            return new Promise((resolve) => {
+              const id = 'dialog_' + (++dialogIdCounter);
+              dialogPromises.set(id, { resolve });
+              
+              const dialogData = {
+                id: id,
+                type: type,
+                title: title || '',
+                message: message || '',
+                defaultValue: defaultValue || ''
+              };
+              
+              DialogChannel.postMessage(JSON.stringify(dialogData));
+            });
+          }
+          
+          // alert 오버라이드
+          window.alert = function(message) {
+            return createDialogPromise('alert', '', message, '').then(response => {
+              return response.confirmed;
+            });
+          };
+          
+          // confirm 오버라이드
+          window.confirm = function(message) {
+            return createDialogPromise('confirm', '', message, '').then(response => {
+              return response.confirmed;
+            });
+          };
+          
+          // prompt 오버라이드
+          window.prompt = function(message, defaultValue) {
+            return createDialogPromise('prompt', '', message, defaultValue || '').then(response => {
+              return response.confirmed ? response.value : null;
+            });
+          };
+          
+          // 동기적 다이얼로그를 위한 폴백 (호환성)
+          const originalAlert = window.alert;
+          const originalConfirm = window.confirm;
+          const originalPrompt = window.prompt;
+          
+          // 동기적 호출을 감지하고 경고
+          const syncDialogWarning = function(type) {
+            console.warn('동기적 ' + type + ' 호출이 감지되었습니다. 네이티브 다이얼로그로 변환됩니다.');
+          };
+          
+          // 기존 함수들을 백업하고 새로운 함수로 교체
+          window._originalAlert = originalAlert;
+          window._originalConfirm = originalConfirm;
+          window._originalPrompt = originalPrompt;
+          
+          console.log('다이얼로그 오버라이드가 설정되었습니다.');
+        })();
+      ''');
+    } catch (e) {
+      WebViewLogger.error('다이얼로그 오버라이드 설정 실패', source: 'DialogOverrideSetup', error: e);
     }
   }
 
@@ -96,9 +261,25 @@ class WebViewBridge {
           await _handleNativeRequest(message.message);
         },
       );
+
+      // 콘솔 로깅 채널
+      _controller.addJavaScriptChannel(
+        'ConsoleChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleConsoleLog(message.message);
+        },
+      );
+
+      // 다이얼로그 채널 (alert, confirm, prompt)
+      _controller.addJavaScriptChannel(
+        'DialogChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleDialogRequest(message.message);
+        },
+      );
     } catch (e) {
       // JavaScript 채널 설정 실패 시 에러 로그 출력
-      debugPrint('JavaScript 채널 설정 실패: $e');
+      WebViewLogger.error('JavaScript 채널 설정 실패', source: 'JavaScriptChannels', error: e);
     }
   }
 
@@ -164,6 +345,186 @@ class WebViewBridge {
     } catch (e) {
       await _sendErrorToWeb('native', e.toString());
     }
+  }
+
+  /// 콘솔 로깅 처리
+  Future<void> _handleConsoleLog(String message) async {
+    try {
+      final data = jsonDecode(message);
+      final level = data['level'] as String? ?? 'log';
+      final messageText = data['message'] as String? ?? '';
+      
+      // WebViewLogger를 사용하여 로깅
+      switch (level.toLowerCase()) {
+        case 'error':
+          WebViewLogger.error(
+            messageText,
+            source: 'WebView',
+            error: data['error'],
+            stackTrace: data['stackTrace'] != null ? StackTrace.fromString(data['stackTrace']) : null,
+          );
+          break;
+        case 'warn':
+        case 'warning':
+          WebViewLogger.warn(messageText, source: 'WebView');
+          break;
+        case 'info':
+          WebViewLogger.info(messageText, source: 'WebView');
+          break;
+        case 'debug':
+          WebViewLogger.debug(messageText, source: 'WebView');
+          break;
+        default:
+          WebViewLogger.info(messageText, source: 'WebView');
+          break;
+      }
+    } catch (e) {
+      // JSON 파싱 실패 시 원본 메시지를 에러로 로깅
+      WebViewLogger.error('Failed to parse console log: $message', source: 'WebView', error: e);
+    }
+  }
+
+  /// 다이얼로그 요청 처리 (alert, confirm, prompt)
+  Future<void> _handleDialogRequest(String message) async {
+    try {
+      final data = jsonDecode(message);
+      final type = data['type'] as String;
+      final id = data['id'] as String;
+      final title = data['title'] as String? ?? '';
+      final messageText = data['message'] as String? ?? '';
+      final defaultValue = data['defaultValue'] as String? ?? '';
+
+      switch (type) {
+        case 'alert':
+          await _showAlert(id, title, messageText);
+          break;
+        case 'confirm':
+          await _showConfirm(id, title, messageText);
+          break;
+        case 'prompt':
+          await _showPrompt(id, title, messageText, defaultValue);
+          break;
+      }
+    } catch (e) {
+      WebViewLogger.error('다이얼로그 요청 처리 실패', source: 'DialogHandler', error: e);
+      // 에러 발생 시 기본값으로 응답 (ID를 알 수 없으므로 빈 문자열 사용)
+      await _sendDialogResponse('', false, '');
+    }
+  }
+
+  /// Alert 다이얼로그 표시
+  Future<void> _showAlert(String id, String title, String message) async {
+    final result = await showDialog<bool>(
+      context: _context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: title.isNotEmpty ? Text(title) : null,
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('확인'),
+            ),
+          ],
+        );
+      },
+    );
+    
+    await _sendDialogResponse(id, result ?? false, '');
+  }
+
+  /// Confirm 다이얼로그 표시
+  Future<void> _showConfirm(String id, String title, String message) async {
+    final result = await showDialog<bool>(
+      context: _context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: title.isNotEmpty ? Text(title) : null,
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('확인'),
+            ),
+          ],
+        );
+      },
+    );
+    
+    await _sendDialogResponse(id, result ?? false, '');
+  }
+
+  /// Prompt 다이얼로그 표시
+  Future<void> _showPrompt(String id, String title, String message, String defaultValue) async {
+    final textController = TextEditingController(text: defaultValue);
+    
+    final result = await showDialog<Map<String, dynamic>>(
+      context: _context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: title.isNotEmpty ? Text(title) : null,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message),
+              const SizedBox(height: 16),
+              TextField(
+                controller: textController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop({'confirmed': false, 'value': ''}),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop({
+                'confirmed': true, 
+                'value': textController.text
+              }),
+              child: const Text('확인'),
+            ),
+          ],
+        );
+      },
+    );
+    
+    final confirmed = result?['confirmed'] as bool? ?? false;
+    final value = result?['value'] as String? ?? '';
+    
+    await _sendDialogResponse(id, confirmed, value);
+  }
+
+  /// 다이얼로그 응답을 WebView로 전송
+  Future<void> _sendDialogResponse(String id, bool confirmed, String value) async {
+    await _controller.runJavaScript('''
+      (function() {
+        try {
+          const response = {
+            id: ${jsonEncode(id)},
+            confirmed: $confirmed,
+            value: ${jsonEncode(value)}
+          };
+          window.dispatchEvent(new CustomEvent('dialogResponse', { 
+            detail: response 
+          }));
+        } catch (e) {
+          console.error('Dialog response send failed:', e);
+        }
+      })();
+    ''');
   }
 
   /// 현재 위치를 WebView로 전송
@@ -241,7 +602,7 @@ class WebViewBridge {
 
   /// 토큰을 WebView로 전송
   Future<void> _sendTokenToWeb() async {
-    final token = await TokenManager.getToken();
+    final token = await TokenManager.getAccessToken();
     if (token != null && TokenManager.isTokenValid(token)) {
       await _controller.runJavaScript('''
         (function() {
