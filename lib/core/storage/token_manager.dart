@@ -12,14 +12,14 @@ class TokenManager {
     ),
   );
 
-  /// JWT 토큰 저장 (서버에서 제공받은 토큰)
-  static Future<void> saveToken(String token) async {
-    await _secureStorage.write(key: AppConfig.tokenKey, value: token);
+  /// Access 토큰 저장 (서버에서 제공받은 토큰)
+  static Future<void> saveAccessToken(String token) async {
+    await _secureStorage.write(key: AppConfig.accessTokenKey, value: token);
   }
 
-  /// JWT 토큰 조회
-  static Future<String?> getToken() async {
-    return await _secureStorage.read(key: AppConfig.tokenKey);
+  /// Access 토큰 조회
+  static Future<String?> getAccessToken() async {
+    return await _secureStorage.read(key: AppConfig.accessTokenKey);
   }
 
   /// Refresh 토큰 저장 (서버에서 제공받은 토큰)
@@ -71,20 +71,20 @@ class TokenManager {
 
   /// 모든 토큰 삭제
   static Future<void> clearTokens() async {
-    await _secureStorage.delete(key: AppConfig.tokenKey);
+    await _secureStorage.delete(key: AppConfig.accessTokenKey);
     await _secureStorage.delete(key: AppConfig.refreshTokenKey);
     await _secureStorage.delete(key: AppConfig.userDataKey);
   }
 
-  /// 토큰 존재 여부 확인
-  static Future<bool> hasToken() async {
-    final token = await getToken();
+  /// Access 토큰 존재 여부 확인
+  static Future<bool> hasAccessToken() async {
+    final token = await getAccessToken();
     return token != null && token.isNotEmpty;
   }
 
-  /// 유효한 토큰 존재 여부 확인
-  static Future<bool> hasValidToken() async {
-    final token = await getToken();
+  /// 유효한 Access 토큰 존재 여부 확인
+  static Future<bool> hasValidAccessToken() async {
+    final token = await getAccessToken();
     return token != null && isTokenValid(token);
   }
 }

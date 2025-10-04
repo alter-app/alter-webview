@@ -23,11 +23,14 @@ class LocationRepository {
         throw LocationServiceDisabledException();
       }
 
-      // 권한 확인
-      final permission = await Geolocator.checkPermission();
+      // 권한 확인 및 요청
+      LocationPermission permission = await Geolocator.checkPermission();
+      
       if (permission == LocationPermission.denied) {
-        final requestPermission = await Geolocator.requestPermission();
-        if (requestPermission == LocationPermission.denied) {
+        // Geolocator를 통한 권한 요청
+        permission = await Geolocator.requestPermission();
+        
+        if (permission == LocationPermission.denied) {
           throw LocationPermissionDeniedException();
         }
       }
@@ -36,13 +39,20 @@ class LocationRepository {
         throw LocationPermissionDeniedForeverException();
       }
 
+      // 권한이 허용되지 않은 경우
+      if (permission != LocationPermission.whileInUse && 
+          permission != LocationPermission.always) {
+        throw LocationPermissionDeniedException();
+      }
+
       // 현재 위치 조회
-      return await Geolocator.getCurrentPosition(
+      final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 10),
       );
+      return position;
     } catch (e) {
-      throw LocationException('현재 위치를 가져올 수 없습니다.');
+      throw LocationException('현재 위치를 가져올 수 없습니다: ${e.toString()}');
     }
   }
 

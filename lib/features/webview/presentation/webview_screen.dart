@@ -26,6 +26,7 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
   void _initializeWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent('alter-app-native')
       ..enableZoom(false)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -99,9 +100,13 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          WebViewWidget(controller: _controller),
+      backgroundColor: const Color(0xFFFFFFFF), // SafeArea 배경색 설정
+      body: SafeArea(
+        child: Container(
+          color: const Color(0xFFFFFFFF), // SafeArea 내부 배경색
+          child: Stack(
+            children: [
+              WebViewWidget(controller: _controller),
           if (_isLoading)
             const Center(
               child: CircularProgressIndicator(),
@@ -137,7 +142,9 @@ class _WebViewScreenState extends ConsumerState<WebViewScreen> {
                 ],
               ),
             ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }

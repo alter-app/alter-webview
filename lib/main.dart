@@ -15,6 +15,12 @@ void main() async {
     overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
   );
   
+  // 화면 회전 고정 (세로 모드만)
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+  
   try {
     // .env 파일 로드
     await dotenv.load(fileName: ".env");
@@ -24,11 +30,6 @@ void main() async {
     AppConfig.apiBaseUrl;
     AppConfig.appName;
     AppConfig.appVersion;
-    AppConfig.locationUpdateInterval;
-    AppConfig.locationAccuracy;
-    AppConfig.enableJavaScript;
-    AppConfig.enableLocalStorage;
-    AppConfig.enableGeolocation;
     
     runApp(
       const ProviderScope(
