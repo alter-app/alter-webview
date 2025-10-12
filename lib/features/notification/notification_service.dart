@@ -1,5 +1,6 @@
 
 import 'package:alter_webview/config/app_config.dart';
+import 'package:alter_webview/core/storage/secure_storage.dart';
 import 'package:dio/dio.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,10 @@ import 'package:flutter/foundation.dart';
 class NotificationService {
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
   final Dio _dio = Dio();
+  
+  // iOS APNs 토큰 준비 대기 시간 (밀리초)
+  // APNs 토큰이 발급되기까지 필요한 최소 대기 시간
+  static const int _apnsTokenWaitTimeMs = 500;
 
   /// 알림 권한 요청 (iOS 및 Android 13+)
   Future<NotificationPermissionStatus> requestNotificationPermission() async {
@@ -57,7 +62,8 @@ class NotificationService {
     try {
       // iOS에서는 APNs 토큰이 먼저 설정되어야 FCM 토큰을 받을 수 있음
       if (defaultTargetPlatform == TargetPlatform.iOS) {
-        await Future.delayed(const Duration(milliseconds: 500));
+        // APNs 토큰 발급을 위한 대기 시간
+        await Future.delayed(const Duration(milliseconds: _apnsTokenWaitTimeMs));
         
         final apnsToken = await _firebaseMessaging.getAPNSToken();
         if (apnsToken != null) {
@@ -97,6 +103,13 @@ class NotificationService {
     // 3. API 엔드포인트 URL 구성
     final String apiEndpoint = '${AppConfig.apiBaseUrl}/api/app/users/device-token';
 
+    // 4. 인증 토큰 가져오기
+    final accessToken = await SecureStorage.read(AppConfig.accessTokenKey);
+    if (accessToken == null) {
+      debugPrint('Access token not found, skipping device token registration.');
+      return;
+    }
+
     try {
       final response = await _dio.post(
         apiEndpoint,
@@ -104,6 +117,12 @@ class NotificationService {
           'device_token': token,
           'platform': defaultTargetPlatform.name,
         },
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $accessToken',
+            'Content-Type': 'application/json',
+          },
+        ),
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
