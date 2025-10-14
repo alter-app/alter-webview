@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     
+    <!-- 푸시 알림 권한 (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
     <!-- 카메라 권한 (필요시) -->
     <!-- <uses-permission android:name="android.permission.CAMERA" /> -->
     
