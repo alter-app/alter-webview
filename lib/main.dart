@@ -3,13 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:alter_webview/firebase_options.dart';
+import 'package:alter_webview/features/notification/notification_service.dart';
 import 'features/webview/presentation/webview_screen.dart';
 import 'config/app_config.dart';
-
-import 'package:firebase_core/firebase_core.dart';
-import 'package:alter_webview/firebase_options.dart';
-
-import 'package:alter_webview/features/notification/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,16 +28,25 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    // 3. FCM 토큰 등록
-    await NotificationService().registerDeviceToken();
+    // 3. FCM Background 메시지 핸들러 등록 (Firebase 초기화 직후)
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+    // 4. 알림 서비스 초기화 (메시지 리스너 설정)
+    await NotificationService().initialize();
     
-    // 4. 상태바 설정
+    // 5. FCM 토큰 발급 (서버 등록은 하지 않음)
+    await NotificationService().getFcmToken();
+    
+    // 6. FCM 토큰 갱신 리스너 설정
+    NotificationService().setupTokenRefreshListener();
+    
+    // 7. 상태바 설정
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.edgeToEdge,
       overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
     );
     
-    // 5. 화면 회전 고정 (세로 모드만)
+    // 8. 화면 회전 고정 (세로 모드만)
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
