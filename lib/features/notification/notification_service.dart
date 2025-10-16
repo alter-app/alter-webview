@@ -248,43 +248,59 @@ class NotificationService {
   }
 
   /// 서버로 FCM 토큰을 전송하는 함수 (권한 요청 포함)
-  Future<void> registerDeviceToken() async {
+  /// [accessToken] 파라미터로 직접 전달 가능, null이면 SecureStorage에서 읽음
+  Future<void> registerDeviceToken({String? accessToken}) async {
     // 1. 알림 권한 요청
     final permissionStatus = await requestNotificationPermission();
     
     if (permissionStatus != NotificationPermissionStatus.granted &&
         permissionStatus != NotificationPermissionStatus.provisional) {
       debugPrint('Notification permission not granted, skipping token registration.');
-      return;
+      throw Exception('알림 권한이 허용되지 않았습니다.');
     }
 
     // 2. FCM 토큰 가져오기
     final token = await getFcmToken();
     if (token == null) {
       debugPrint('FCM token is null, skipping registration.');
-      return;
+      throw Exception('FCM 토큰을 가져올 수 없습니다.');
     }
 
-    // 3. API 엔드포인트 URL 구성
-    final String apiEndpoint = '${AppConfig.apiBaseUrl}/api/app/users/device-token';
-
-    // 4. 인증 토큰 가져오기
-    final accessToken = await SecureStorage.read(AppConfig.accessTokenKey);
-    if (accessToken == null) {
+    // 3. 인증 토큰 확인 (파라미터로 전달되지 않으면 SecureStorage에서 읽음)
+    String? authToken = accessToken;
+    if (authToken == null || authToken.isEmpty) {
+      authToken = await SecureStorage.read(AppConfig.accessTokenKey);
+    }
+    
+    if (authToken == null || authToken.isEmpty) {
       debugPrint('Access token not found, skipping device token registration.');
-      return;
+      throw Exception('액세스 토큰이 없습니다.');
     }
+
+    // 4. 플랫폼 타입 결정 (iOS, Android만 허용)
+    String devicePlatform;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      devicePlatform = 'IOS';
+    } else if (defaultTargetPlatform == TargetPlatform.android) {
+      devicePlatform = 'ANDROID';
+    } else {
+      debugPrint('지원하지 않는 플랫폼입니다: $defaultTargetPlatform');
+      throw Exception('지원하지 않는 플랫폼입니다. iOS 또는 Android만 지원됩니다.');
+    }
+
+    // 5. API 엔드포인트 URL 구성
+    final String apiEndpoint = '${AppConfig.apiBaseUrl}/api/app/users/device-token';
 
     try {
       final response = await _dio.post(
         apiEndpoint,
         data: {
-          'device_token': token,
-          'platform': defaultTargetPlatform.name,
+          'deviceToken': token,
+          'devicePlatform': devicePlatform,
         },
         options: Options(
           headers: {
-            'Authorization': 'Bearer $accessToken',
+            'Authorization': 'Bearer $authToken',
             'Content-Type': 'application/json',
           },
         ),
@@ -294,9 +310,22 @@ class NotificationService {
         debugPrint('Device token registered successfully.');
       } else {
         debugPrint('Failed to register device token: ${response.statusCode}');
+        throw Exception('FCM 토큰 등록 실패: ${response.statusCode}');
       }
     } on DioException catch (e) {
-      debugPrint('Error registering device token: $e');
+      final responseData = e.response?.data;
+      
+      // 서버 응답 에러 메시지 추출
+      String errorMessage = '알 수 없는 오류가 발생했습니다.';
+      
+      if (responseData != null && responseData is Map<String, dynamic>) {
+        errorMessage = responseData['message']?.toString() ?? errorMessage;
+      }
+      
+      // 에러 메시지 로깅
+      debugPrint('FCM 토큰 등록 실패: $errorMessage');
+      
+      throw Exception(errorMessage);
     }
   }
 
@@ -304,9 +333,24 @@ class NotificationService {
   void setupTokenRefreshListener() {
     _firebaseMessaging.onTokenRefresh.listen((newToken) {
       debugPrint('FCM Token refreshed: $newToken');
-      // TODO: 서버에 새 토큰 전송
-      registerDeviceToken();
+      // 로그인된 상태에서만 서버에 새 토큰 전송
+      _registerDeviceTokenIfLoggedIn();
     });
+  }
+
+  /// 로그인된 상태에서만 디바이스 토큰 등록
+  Future<void> _registerDeviceTokenIfLoggedIn() async {
+    try {
+      // 액세스 토큰이 있는지 확인 (로그인 상태 확인)
+      final accessToken = await SecureStorage.read(AppConfig.accessTokenKey);
+      if (accessToken != null && accessToken.isNotEmpty) {
+        await registerDeviceToken(accessToken: accessToken);
+      } else {
+        debugPrint('사용자가 로그인되지 않음. FCM 토큰 등록 건너뜀.');
+      }
+    } catch (e) {
+      debugPrint('FCM 토큰 등록 실패: $e');
+    }
   }
 }
 

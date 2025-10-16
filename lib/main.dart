@@ -31,13 +31,10 @@ void main() async {
     // 3. FCM Background 메시지 핸들러 등록 (Firebase 초기화 직후)
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // 4. 알림 서비스 초기화 (메시지 리스너 설정)
+    // 4. 알림 서비스 초기화 (메시지 리스너 설정만)
     await NotificationService().initialize();
     
-    // 5. FCM 토큰 발급 (서버 등록은 하지 않음)
-    await NotificationService().getFcmToken();
-    
-    // 6. FCM 토큰 갱신 리스너 설정
+    // 5. FCM 토큰 갱신 리스너 설정 (로그인 시에만 서버 등록)
     NotificationService().setupTokenRefreshListener();
     
     // 7. 상태바 설정

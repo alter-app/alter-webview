@@ -744,10 +744,10 @@ class WebViewBridge {
       
       // 2. FCM 토큰 서버 등록
       try {
-        await NotificationService().registerDeviceToken();
+        await NotificationService().registerDeviceToken(accessToken: accessToken);
         WebViewLogger.info('FCM 토큰 서버 등록 완료', source: 'AuthDataSave');
       } catch (e) {
-        WebViewLogger.error('FCM 토큰 서버 등록 실패', source: 'AuthDataSave', error: e);
+        WebViewLogger.error('FCM 토큰 서버 등록 실패: ${e.toString()}', source: 'AuthDataSave');
         // FCM 등록 실패는 치명적이지 않으므로 계속 진행
       }
       
@@ -791,12 +791,12 @@ class WebViewBridge {
       
       WebViewLogger.info('토큰 저장 완료', source: 'TokenSave');
       
-      // 2. FCM 토큰 서버 등록
+      // 2. FCM 토큰 서버 등록 (accessToken을 명시적으로 전달)
       try {
-        await NotificationService().registerDeviceToken();
+        await NotificationService().registerDeviceToken(accessToken: token);
         WebViewLogger.info('FCM 토큰 서버 등록 완료', source: 'TokenSave');
       } catch (e) {
-        WebViewLogger.error('FCM 토큰 서버 등록 실패', source: 'TokenSave', error: e);
+        WebViewLogger.error('FCM 토큰 서버 등록 실패: ${e.toString()}', source: 'TokenSave');
         // FCM 등록 실패는 치명적이지 않으므로 계속 진행
       }
       
