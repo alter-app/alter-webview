@@ -26,7 +26,7 @@ class NotificationService {
   final Dio _dio = Dio();
   
   // iOS APNs 토큰 준비 대기 시간 (밀리초)
-  static const int _apnsTokenWaitTimeMs = 500;
+  static const int _apnsTokenWaitTimeMs = 1500;
   
   // Android 알림 채널 설정
   static const String _channelId = 'alter_notification_channel';
