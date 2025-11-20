@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/storage/token_manager.dart';
 import '../../../core/logging/webview_logger.dart';
 import '../../location/presentation/location_provider.dart';
+import '../../notification/notification_service.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -79,6 +80,9 @@ class WebViewBridge {
       Future.delayed(_dialogOverrideDelay, () async {
         await _setupDialogOverride();
       });
+      
+      // localStorage 토큰 감지기 설정 (즉시 실행)
+      await _setupTokenWatcher();
     } catch (e) {
       // 네이티브 데이터 주입 실패 시 에러 로그 출력
       WebViewLogger.error('네이티브 데이터 주입 실패', source: 'NativeDataInjection', error: e);
@@ -252,6 +256,67 @@ class WebViewBridge {
     }
   }
 
+  /// 웹에서 로그인 성공 시 auth-storage 데이터를 네이티브로 전달받는 브릿지 설정
+  /// 웹에서 직접 TokenChannel을 통해 호출
+  Future<void> _setupTokenWatcher() async {
+    try {
+      await _controller.runJavaScript('''
+        (function() {
+          console.log('[Token Bridge] 토큰 브릿지 설정 시작');
+          
+          // 웹에서 로그인 성공 시 호출할 함수를 전역으로 노출
+          window.sendAuthDataToNative = function() {
+            try {
+              const authStorageData = localStorage.getItem('auth-storage');
+              if (!authStorageData) {
+                console.warn('[Token Bridge] auth-storage 데이터 없음');
+                return;
+              }
+              
+              const parsed = JSON.parse(authStorageData);
+              if (!parsed.state) {
+                console.warn('[Token Bridge] auth-storage state 없음');
+                return;
+              }
+              
+              const { accessToken, refreshToken, authorizationId, scope } = parsed.state;
+              
+              if (!accessToken) {
+                console.warn('[Token Bridge] accessToken 없음');
+                return;
+              }
+              
+              console.log('[Token Bridge] auth-storage 데이터 전송 시작');
+              
+              if (window.TokenChannel) {
+                TokenChannel.postMessage(JSON.stringify({
+                  action: 'saveAuthData',
+                  authData: {
+                    accessToken: accessToken,
+                    refreshToken: refreshToken,
+                    authorizationId: authorizationId,
+                    scope: scope
+                  }
+                }));
+                console.log('[Token Bridge] auth-storage 데이터 전송 완료');
+              } else {
+                console.warn('[Token Bridge] TokenChannel 없음');
+              }
+            } catch (error) {
+              console.error('[Token Bridge] 데이터 전송 실패:', error);
+            }
+          };
+          
+          console.log('[Token Bridge] 설정 완료 - window.sendAuthDataToNative() 사용');
+        })();
+      ''');
+      
+      WebViewLogger.info('토큰 브릿지 설정 완료', source: 'TokenBridge');
+    } catch (e) {
+      WebViewLogger.error('토큰 브릿지 설정 실패', source: 'TokenBridge', error: e);
+    }
+  }
+
   /// JavaScript 채널 설정
   void setupJavaScriptChannels() {
     try {
@@ -332,7 +397,12 @@ class WebViewBridge {
         case 'getToken':
           await _sendTokenToWeb();
           break;
-        // 토큰 갱신은 웹에서 처리하므로 제거
+        case 'saveToken':
+          await _saveTokenFromWeb(data);
+          break;
+        case 'saveAuthData':
+          await _saveAuthDataFromWeb(data);
+          break;
         case 'clearToken':
           await _clearTokenForWeb();
           break;
@@ -643,15 +713,134 @@ class WebViewBridge {
     }
   }
 
-  // 토큰 갱신은 웹에서 처리하므로 제거
+  /// 웹에서 전달받은 auth-storage 데이터 저장 및 FCM 서버 등록
+  Future<void> _saveAuthDataFromWeb(Map<String, dynamic> data) async {
+    try {
+      final authData = data['authData'] as Map<String, dynamic>?;
+      
+      if (authData == null) {
+        await _sendErrorToWeb('authData', 'AuthData is null');
+        return;
+      }
+      
+      final accessToken = authData['accessToken'] as String?;
+      final refreshToken = authData['refreshToken'] as String?;
+      final authorizationId = authData['authorizationId'] as String?;
+      final scope = authData['scope'] as String?;
+      
+      if (accessToken == null || accessToken.isEmpty) {
+        await _sendErrorToWeb('authData', 'AccessToken is null or empty');
+        return;
+      }
+      
+      // 1. 토큰 저장
+      await TokenManager.saveAccessToken(accessToken);
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await TokenManager.saveRefreshToken(refreshToken);
+      }
+      
+      WebViewLogger.info('Auth 데이터 저장 완료', source: 'AuthDataSave');
+      WebViewLogger.info('Scope: $scope, AuthId: $authorizationId', source: 'AuthDataSave');
+      
+      // 2. FCM 토큰 서버 등록
+      try {
+        await NotificationService().registerDeviceToken(accessToken: accessToken);
+        WebViewLogger.info('FCM 토큰 서버 등록 완료', source: 'AuthDataSave');
+      } catch (e) {
+        WebViewLogger.error('FCM 토큰 서버 등록 실패: ${e.toString()}', source: 'AuthDataSave');
+        // FCM 등록 실패는 치명적이지 않으므로 계속 진행
+      }
+      
+      // 3. 성공 응답 전송
+      await _controller.runJavaScript('''
+        window.dispatchEvent(new CustomEvent('authDataSaved', { 
+          detail: { success: true, scope: ${jsonEncode(scope)} } 
+        }));
+      ''');
+      
+      WebViewLogger.info('Auth 데이터 저장 프로세스 완료', source: 'AuthDataSave');
+    } catch (e) {
+      WebViewLogger.error('Auth 데이터 저장 실패', source: 'AuthDataSave', error: e);
+      await _sendErrorToWeb('authData', e.toString());
+      
+      // 실패 응답 전송
+      await _controller.runJavaScript('''
+        window.dispatchEvent(new CustomEvent('authDataSaved', { 
+          detail: { success: false, error: ${jsonEncode(e.toString())} } 
+        }));
+      ''');
+    }
+  }
 
-  /// 토큰 삭제
+  /// 웹에서 전달받은 토큰 저장 및 FCM 서버 등록 (기존 호환성)
+  Future<void> _saveTokenFromWeb(Map<String, dynamic> data) async {
+    try {
+      final token = data['token'] as String?;
+      final refreshToken = data['refreshToken'] as String?;
+      
+      if (token == null || token.isEmpty) {
+        await _sendErrorToWeb('token', 'Token is null or empty');
+        return;
+      }
+      
+      // 1. 토큰 저장
+      await TokenManager.saveAccessToken(token);
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await TokenManager.saveRefreshToken(refreshToken);
+      }
+      
+      WebViewLogger.info('토큰 저장 완료', source: 'TokenSave');
+      
+      // 2. FCM 토큰 서버 등록 (accessToken을 명시적으로 전달)
+      try {
+        await NotificationService().registerDeviceToken(accessToken: token);
+        WebViewLogger.info('FCM 토큰 서버 등록 완료', source: 'TokenSave');
+      } catch (e) {
+        WebViewLogger.error('FCM 토큰 서버 등록 실패: ${e.toString()}', source: 'TokenSave');
+        // FCM 등록 실패는 치명적이지 않으므로 계속 진행
+      }
+      
+      // 3. 성공 응답 전송
+      await _controller.runJavaScript('''
+        window.dispatchEvent(new CustomEvent('tokenSaved', { 
+          detail: { success: true } 
+        }));
+      ''');
+      
+      WebViewLogger.info('토큰 저장 프로세스 완료', source: 'TokenSave');
+    } catch (e) {
+      WebViewLogger.error('토큰 저장 실패', source: 'TokenSave', error: e);
+      await _sendErrorToWeb('token', e.toString());
+      
+      // 실패 응답 전송
+      await _controller.runJavaScript('''
+        window.dispatchEvent(new CustomEvent('tokenSaved', { 
+          detail: { success: false, error: ${jsonEncode(e.toString())} } 
+        }));
+      ''');
+    }
+  }
+
+  /// 토큰 삭제 및 FCM 토큰 제거
   Future<void> _clearTokenForWeb() async {
-    await TokenManager.clearTokens();
-    await _controller.runJavaScript('''
-      localStorage.removeItem('jwt_token');
-      window.dispatchEvent(new CustomEvent('tokenCleared'));
-    ''');
+    try {
+      // 1. 토큰 삭제
+      await TokenManager.clearTokens();
+      
+      // 2. WebView localStorage 토큰 삭제
+      await _controller.runJavaScript('''
+        localStorage.removeItem('jwt_token');
+        window.dispatchEvent(new CustomEvent('tokenCleared'));
+      ''');
+      
+      WebViewLogger.info('토큰 삭제 완료', source: 'TokenClear');
+      
+      // 참고: FCM 토큰 제거는 서버에서 처리하거나 
+      // 다음 로그인 시 덮어쓰기로 처리할 수 있음
+    } catch (e) {
+      WebViewLogger.error('토큰 삭제 실패', source: 'TokenClear', error: e);
+      await _sendErrorToWeb('token', e.toString());
+    }
   }
 
   /// 디바이스 정보 전송
