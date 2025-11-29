@@ -307,7 +307,24 @@ class WebViewBridge {
             }
           };
           
+          // 웹에서 로그아웃 시 호출할 함수를 전역으로 노출
+          window.onWebLogout = function() {
+            try {
+              console.log('[Logout Bridge] 로그아웃 요청 시작');
+              
+              if (window.LogoutChannel) {
+                LogoutChannel.postMessage(JSON.stringify({ action: 'logout' }));
+                console.log('[Logout Bridge] 로그아웃 요청 전송 완료');
+              } else {
+                console.warn('[Logout Bridge] LogoutChannel 없음');
+              }
+            } catch (error) {
+              console.error('[Logout Bridge] 로그아웃 요청 실패:', error);
+            }
+          };
+          
           console.log('[Token Bridge] 설정 완료 - window.sendAuthDataToNative() 사용');
+          console.log('[Logout Bridge] 설정 완료 - window.onWebLogout() 사용');
         })();
       ''');
       
@@ -357,6 +374,14 @@ class WebViewBridge {
         'DialogChannel',
         onMessageReceived: (JavaScriptMessage message) async {
           await _handleDialogRequest(message.message);
+        },
+      );
+
+      // 로그아웃 채널
+      _controller.addJavaScriptChannel(
+        'LogoutChannel',
+        onMessageReceived: (JavaScriptMessage message) async {
+          await _handleLogoutRequest(message.message);
         },
       );
     } catch (e) {
@@ -840,6 +865,36 @@ class WebViewBridge {
     } catch (e) {
       WebViewLogger.error('토큰 삭제 실패', source: 'TokenClear', error: e);
       await _sendErrorToWeb('token', e.toString());
+    }
+  }
+
+  /// 로그아웃 요청 처리
+  Future<void> _handleLogoutRequest(String message) async {
+    try {
+      WebViewLogger.info('로그아웃 요청 수신', source: 'LogoutHandler');
+      
+      // 1. 네이티브 secure storage의 토큰 삭제
+      await TokenManager.clearTokens();
+      
+      // 2. WebView localStorage의 토큰 삭제
+      await _controller.runJavaScript('''
+        (function() {
+          try {
+            localStorage.removeItem('jwt_token');
+            localStorage.removeItem('auth-storage');
+            window.dispatchEvent(new CustomEvent('logoutCompleted', { 
+              detail: { success: true } 
+            }));
+          } catch (e) {
+            console.error('localStorage 토큰 삭제 실패:', e);
+          }
+        })();
+      ''');
+      
+      WebViewLogger.info('로그아웃 처리 완료', source: 'LogoutHandler');
+    } catch (e) {
+      WebViewLogger.error('로그아웃 처리 실패', source: 'LogoutHandler', error: e);
+      await _sendErrorToWeb('logout', e.toString());
     }
   }
 
